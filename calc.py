@@ -1,4 +1,14 @@
 import sys
+DEBUG = False
+
+def log(*args, **kwargs):
+    """ Simple debugging. Use this instead of `print`, please. """
+    if not DEBUG:
+        return
+    print(*args, **kwargs)
+
+class TimeoutError(Exception):
+    pass
 
 def calc_power_series(coefficients, x):
     """ Calculate value of power series with given coefficients.
@@ -6,7 +16,8 @@ def calc_power_series(coefficients, x):
         Domb-Sykes method.
         (For details, see https://en.wikipedia.org/wiki/Radius_of_convergence#Domb.E2.80.93Sykes_plot) 
         
-        If `coefficients` is a list or tuple or any iterable that implements `__len__` or `__length_hint__`, this assumes finiteness and returns the exact value of power series.
+        If `coefficients` is a list or tuple or any iterable that implements `__len__` or `__length_hint__`, 
+            this assumes finiteness and returns the exact value of power series.
         If not, assumes infiniteness and returns estimation.
 
 
@@ -26,8 +37,10 @@ def calc_power_series(coefficients, x):
 
     # Validation for inifinite power series
     # Estimate radius of convergence and test if x is in range of (-1/r, 1/r)  
-    err = "x is (-1/r, 1/r) or coefficients is list or finite"
+    r = float('inf') # init r
+    err = "x is (-r, r) or coefficients is list or finite"
     if not is_finite:
+        # Domb-Sykes radius of convergence estimation
         radius_estimation = 10
         for _ in range(radius_estimation):
             coeffs_cache.append(next(coeffs))
@@ -40,7 +53,7 @@ def calc_power_series(coefficients, x):
 
         line = fit(X, Y)
         r = 1 / line(0) # estimated radius of convergence
-        if r > 0 and not -1/r < x < 1/r:
+        if r > 0 and not -r < x < r:
             raise ValueError(err)
 
     if is_finite: 
@@ -51,6 +64,7 @@ def calc_power_series(coefficients, x):
         result = finite
     else:
         infinite = 0
+        threshold = 1000 # If it takes too long, stop
         err = 0.0000001 # Error boundary
         i = 0 
         for c in coeffs_cache:
@@ -58,13 +72,36 @@ def calc_power_series(coefficients, x):
             infinite += c * x ** i
             i += 1
 
-        while abs(infinite - last_infinite) > err:
-            last_infinite = infinite
-            c = next(coeffs)
-            infinite += c * x ** i
-            i += 1
+        try:
+            while abs(infinite - last_infinite) > err:
+                last_infinite = infinite
+                c = next(coeffs)
+                infinite += c * x ** i
+                i += 1
+                if(i > threshold):
+                    raise TimeoutError() 
+        except TimeoutError:
+            log('TimeoutError Raised!')
+            del infinite # in case I accidently use this
+        else:
+            result = infinite
 
-        result = infinite
+
+    # For debugging
+    if not isinstance(coeffs, (list, tuple)) and "infinite" not in locals():
+        # Oh no, too much iteration in infinite 
+        suggested_fix_template = "10 * {error}"
+        log("Too much iteration! You might want to adjust error percision with formula %s" % suggested_fix_template)
+        # Render template
+        suggested_error_precision = eval(suggested_fix_template.format(error=err))
+        log("which is %s" % suggested_error_precision)
+
+        #sanity_check_template = "100 * {suggested_fix}"
+        sanity_check_template = "1 * {suggested_fix}" # 100 was too big. Needs more testing
+        log("If %s is bigger than 1, there's something wrong." % sanity_check_template)
+        log("Note that Domb-Sykes method assumes the sequence to have same or alternating signs")
+        sanity_check = eval(sanity_check_template.format(suggested_fix=suggested_error_precision)) # Render template
+        print(sanity_check)
 
     return result
 
@@ -74,9 +111,9 @@ def fit(X, Y):
     mean_x = sum(X) / len(X)
     mean_y = sum(Y) / len(Y)
 
-    b = sum((x - mean_x) * (y - mean_y) for (x, y) in zip(X, Y)) / sum( (x-mean_x)**2 for x in X)
+    b = sum((x - mean_x) * (y - mean_y) for (x, y) in zip(X, Y)) / sum((x-mean_x)**2 for x in X)
     a = mean_y - b * mean_x
-    return lambda x: a+b*x
+    return lambda x: a + b*x
 
 
 if __name__ == '__main__':
@@ -88,9 +125,9 @@ if __name__ == '__main__':
 
     # Test calc_power_series
     ## finite series
-    assert(calc_power_series([1, 2, 3, 4], 5) == 586)
-    assert(calc_power_series((1, 2, 3, 4), -1) == -2)
-    assert(calc_power_series([1, 2, 3, 4], 0.1) == 1.234)
+    assert(calc_power_series([1, 2, 3, 4], 5) == 586) # list
+    assert(calc_power_series((1, 2, 3, 4), -1) == -2) # tuple also works
+    assert(calc_power_series([1, 2, 3, 4], 0.1) == 1.234) # float works 
 
     ## infinite series
     def yield_infinite_ones():
@@ -109,4 +146,7 @@ if __name__ == '__main__':
     else:
         print('x in invalid range didn\'t raise an exception!')
         assert(False)
-    
+
+
+    if len(sys.argv) > 0:
+        calc_power_series(sys.argv[1], 1)
